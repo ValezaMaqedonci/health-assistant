@@ -1,0 +1,14 @@
+venv/
+.venv/
+__pycache__/
+.vscode/
+cache/
+
+# Data files (VERY IMPORTANT)
+*.db
+*.csv
+
+# Python junk
+*.pyc
+*.pyo
+*.pyd

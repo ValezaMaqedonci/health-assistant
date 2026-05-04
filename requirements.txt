@@ -1,0 +1,9 @@
+streamlit
+pandas
+Pillow
+scikit-learn
+deep-translator
+folium
+streamlit-folium
+geopy
+osmnx
