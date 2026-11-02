@@ -1,35 +1,53 @@
 import streamlit as st
 import pandas as pd
-import datetime
 import os
+import datetime
+import html
+from abc import ABC, abstractmethod
 from PIL import Image
 from sklearn.linear_model import LinearRegression
 from utils.ocr import extract_text
 from utils.chatbot import symptom_response
-from deep_translator import GoogleTranslator
 import sqlite3
 import hashlib
-from functools import lru_cache
+from geopy.geocoders import Nominatim
+import folium
+import osmnx as ox
+from streamlit_folium import st_folium
+from utils.body_explorer import render_body_explorer
+
 
 # =================================================
-# DATABASE SETUP
+# PAGE CONFIG
+# =================================================
+st.set_page_config(page_title="Smart Health Assistant", layout="wide")
+
+# =================================================
+# DATABASE
 # =================================================
 DB_FILE = "users.db"
-conn = sqlite3.connect(DB_FILE)
-c = conn.cursor()
-c.execute("""
-CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT UNIQUE NOT NULL,
-    password TEXT NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-)
-""")
-conn.commit()
-conn.close()
+
+
+def init_db():
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+
+init_db()
+
 
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
+
 
 def signup(username, password):
     conn = sqlite3.connect(DB_FILE)
@@ -48,85 +66,160 @@ def signup(username, password):
     finally:
         conn.close()
 
+
 def login(username, password):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    c.execute("SELECT id, password FROM users WHERE username=?", (username,))
+    c.execute(
+        "SELECT id, password FROM users WHERE username=?",
+        (username,)
+    )
     result = c.fetchone()
     conn.close()
+
     if result:
         user_id, stored_hash = result
         if stored_hash == hash_password(password):
             return True, user_id, username
+
     return False, None, None
 
-# =================================================
-# PAGE CONFIG
-# =================================================
-st.set_page_config(page_title="Smart Health Assistant", layout="wide")
-st.title("🩺 Smart Health Assistant")
 
 # =================================================
-# LANGUAGE SYSTEM (OPTIMIZED)
+# SESSION STATE
 # =================================================
+if "user_id" not in st.session_state:
+    st.session_state.user_id = None
 
-LANGUAGES = {
-    "English": "en", "Spanish": "es", "French": "fr", "German": "de",
-    "Italian": "it", "Albanian": "sq", "Arabic": "ar", "Turkish": "tr"
-}
-
-selected_language = st.sidebar.selectbox("🌍 Language", list(LANGUAGES.keys()))
-lang_code = LANGUAGES[selected_language]
-
-# Use Streamlit cache (much faster across reruns)
-@st.cache_data(show_spinner=False)
-def cached_translate(text, lang):
-    if lang == "en":
-        return text
-    try:
-        return GoogleTranslator(source="en", target=lang).translate(text)
-    except:
-        return text
-
-def t(text):
-    return cached_translate(text, lang_code)
-
-def translate_response(text):
-    return cached_translate(text, lang_code)
-
-# =================================================
-# THEME SYSTEM
-# =================================================
 if "theme" not in st.session_state:
     st.session_state.theme = "Black Mode"
 
+if "page" not in st.session_state:
+    st.session_state.page = "home"
+
+
+def go(page):
+    st.session_state.page = page
+
+
+# =================================================
+# THEME
+# =================================================
 def apply_theme(theme):
     if theme == "Black Mode":
-        st.markdown("""<style>
-        .stApp { background:#0e1117; color:white; }
-        section[data-testid="stSidebar"] { background:#1b1f2a; }
-        label, span, p, div { color:white !important; }
-        input, textarea, button { background:#1f2433 !important; color:white !important; }
-        div[data-baseweb="select"] > div { background:#1f2433 !important; color:white !important; }
-        ul[role="listbox"] { background:#1f2433 !important; color:white !important; }
-        li[role="option"] { background:#2b2f3a !important; color:white !important; }
-        li[role="option"]:hover { background:#3a3f4a !important; }
-        .card { background:#1f2433; padding:14px; border-radius:12px; margin-bottom:12px; }
-        </style>""", unsafe_allow_html=True)
+        st.markdown("""
+        <style>
+        .stApp { background:#0F172A; color:white; }
+        section[data-testid="stSidebar"] {
+            background:#111827; border-right:1px solid #1F2937;
+        }
+        .card {
+            background:linear-gradient(135deg,#1E293B,#334155);
+            border-radius:22px; padding:22px; margin-bottom:20px;
+            box-shadow:0 10px 30px rgba(0,0,0,.35); transition:.3s;
+        }
+        .card:hover { transform:translateY(-3px); }
+        .stButton>button {
+            width:100%; border:none; border-radius:16px; padding:14px;
+            font-size:16px; font-weight:600;
+            background:linear-gradient(90deg,#2f343d); color:white;
+        }
+        .stButton>button:hover {
+            background:linear-gradient(90deg,#1C7BFF,#4098FF);
+        }
+        input,textarea { border-radius:14px !important; }
+        [data-testid="metric-container"] {
+            background:#1E293B; border-radius:18px; padding:18px;
+            box-shadow:0 6px 20px rgba(0,0,0,.3);
+        }
+        h1,h2,h3,h4,h5,h6 { color:white; }
+        .stProgress>div>div { background:#2E8BFF; }
+        </style>
+        """, unsafe_allow_html=True)
     else:
-        st.markdown("""<style>
-        .stApp { background:white; color:black; }
-        section[data-testid="stSidebar"] { background:#f4f4f4; }
-        label, span, p, div { color:black !important; }
-        input, textarea, button { background:#eaeaea !important; color:black !important; }
-        div[data-baseweb="select"] > div { background:white !important; color:black !important; }
-        ul[role="listbox"] { background:white !important; color:black !important; }
-        li[role="option"] { background:white !important; color:black !important; }
-        li[role="option"]:hover { background:#eaeaea !important; }
-        .card { background:#f6f6f6; padding:14px; border-radius:12px; margin-bottom:12px; }
-        </style>""", unsafe_allow_html=True)
+        st.markdown("""
+        <style>
+        .stApp { background:#F4F7FC; color:#111827; }
+        section[data-testid="stSidebar"] {
+            background:white; border-right:1px solid #E5E7EB;
+        }
+        .card {
+            background:white; border-radius:22px; padding:22px;
+            margin-bottom:20px; box-shadow:0 8px 25px rgba(0,0,0,.08);
+            transition:.3s;
+        }
+        .card:hover { transform:translateY(-3px); }
+        .stButton>button {
+            width:100%; border:none; border-radius:16px; padding:14px;
+            font-size:16px; font-weight:600;
+            background:linear-gradient(90deg,#2E8BFF,#4FA3FF); color:white;
+        }
+        .stButton>button:hover {
+            background:linear-gradient(90deg,#1C7BFF,#4098FF);
+        }
+        input,textarea { border-radius:14px !important; }
+        [data-testid="metric-container"] {
+            background:white; border-radius:18px; padding:18px;
+            box-shadow:0 6px 20px rgba(0,0,0,.08);
+        }
+        .stProgress>div>div { background:#2E8BFF; }
+        h1,h2,h3,h4,h5,h6 { color:#111827; }
+        </style>
+        """, unsafe_allow_html=True)
+
 
 apply_theme(st.session_state.theme)
+
+# =================================================
+# APP HEADER
+# =================================================
+st.markdown(
+    f"""
+    <h2 style='text-align:center;'>🩺 {("Smart Health Assistant")}</h2>
+    <p style='text-align:center; opacity:0.7;'>
+        {("Your personal AI-powered health companion")}
+    </p>
+    """,
+    unsafe_allow_html=True
+)
+
+# =================================================
+# HYDRATION TRACKER HELPERS
+# =================================================
+class WaterValue(ABC):
+    def __init__(self, glasses=0, target_glasses=8):
+        self.glasses = max(0, int(glasses))
+        self.target_glasses = max(1, int(target_glasses))
+
+    @abstractmethod
+    def current_value(self):
+        pass
+
+    @abstractmethod
+    def goal_progress(self):
+        pass
+
+    @abstractmethod
+    def hydration_status(self):
+        pass
+
+
+class DailyWaterTracker(WaterValue):
+    def current_value(self):
+        return self.glasses
+
+    def goal_progress(self):
+        return round(min(100.0, (self.glasses / self.target_glasses) * 100), 1)
+
+    def hydration_status(self):
+        if self.glasses >= self.target_glasses:
+            return "Well hydrated"
+        if self.glasses >= self.target_glasses * 0.75:
+            return "On track"
+        if self.glasses >= self.target_glasses * 0.5:
+            return "Drink a little more"
+        return "Dehydrated"
+
 
 # =================================================
 # USER FILES
@@ -134,412 +227,602 @@ apply_theme(st.session_state.theme)
 def get_user_files():
     uid = st.session_state.user_id
     if uid is None:
-        return None, None, None
-    return f"symptom_history_{uid}.csv", f"user_data_{uid}.csv", f"vitals_data_{uid}.csv"
+        return None, None, None, None
+
+    return (
+        f"symptom_history_{uid}.csv",
+        f"user_data_{uid}.csv",
+        f"vitals_data_{uid}.csv",
+        f"medications_{uid}.csv",
+    )
+
 
 # =================================================
 # LOGIN / SIGNUP
 # =================================================
-if "user_id" not in st.session_state:
-    st.session_state.user_id = None
-if "username" not in st.session_state:
-    st.session_state.username = None
-
 if st.session_state.user_id is None:
-    st.sidebar.subheader(t("Login / Signup"))
-
-    # KEEP INTERNAL VALUES IN ENGLISH (do not translate logic values)
+    st.sidebar.subheader(("Login / Signup"))
     action = st.sidebar.radio(
-        t("Action"),
-        ["Login", "Signup"],
-        format_func=lambda x: t(x)  # translate only for display
+        ("Action"),
+        [("Login"), ("Signup")],
+        key="login_action"
+    )
+    username = st.sidebar.text_input(("Username"))
+    password = st.sidebar.text_input(("Password"), type="password")
+
+    if st.sidebar.button(("Login") if action == ("Login") else ("Signup"), key="login_signup_button"):
+        # The translated radio label is mapped back to the action.
+        if action == ("Signup"):
+            success, uid, uname = signup(username, password)
+        else:
+            success, uid, uname = login(username, password)
+
+        if success:
+            st.session_state.user_id = uid
+            st.rerun()
+        else:
+            st.sidebar.error(("Invalid credentials"))
+else:
+    st.sidebar.markdown(f"### {('Logged In')}")
+    if st.sidebar.button(("Logout")):
+        st.session_state.user_id = None
+        st.rerun()
+
+
+# =================================================
+# SIDEBAR NAVIGATION
+# =================================================
+st.sidebar.markdown(f"## {('Navigation')}")
+
+navigation = [
+    ("🏠", "Home", "home"),
+    ("🤖", "Assistant", "assistant"),
+    ("💊", "Scan", "scan"),
+    ("🧍", "AI Body Explorer", "body_explorer"),
+    ("📊", "Health", "health"),
+    ("🏥", "Nearby", "nearby"),
+    ("💊", "Reminders", "reminders"),
+    ("⚙️", "Settings", "settings"),
+]
+
+for icon, label, page_name in navigation:
+    if st.sidebar.button(f"{icon} {(label)}", key=f"nav_{page_name}"):
+        go(page_name)
+
+page = st.session_state.page
+
+# =================================================
+# AI BODY EXPLORER
+# =================================================
+if page == "body_explorer":
+    render_body_explorer()
+
+
+# =================================================
+# HOME
+# =================================================
+elif page == "home":
+    steps_value = 0
+    water_value = 0
+    sleep_value = 0.0
+    mood_value = 0
+    steps_change = 0
+    water_change = 0
+    sleep_change = 0
+    df_home = pd.DataFrame()
+
+    if st.session_state.user_id is not None:
+        _, data_file, _, _ = get_user_files()
+        if data_file and os.path.exists(data_file):
+            df_home = pd.read_csv(data_file)
+            if not df_home.empty:
+                latest = df_home.iloc[-1]
+                steps_value = int(latest["steps"])
+                water_value = int(latest["water_glasses"])
+                sleep_value = float(latest["sleep_hours"])
+                mood_value = int(latest["mood"])
+
+                if len(df_home) >= 2:
+                    previous = df_home.iloc[-2]
+                    steps_change = steps_value - int(previous["steps"])
+                    water_change = water_value - int(previous["water_glasses"])
+                    sleep_change = round(
+                        sleep_value - float(previous["sleep_hours"]), 1
+                    )
+
+    st.markdown(
+        f"""
+        <div class="card">
+            <h1>❤️ {("Smart Health Assistant")}</h1>
+            <h3>{("Welcome back!")}</h3>
+            <p style="opacity:.8;">
+                {("Stay healthy today and keep tracking your progress.")}
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True
     )
 
-    username = st.sidebar.text_input(t("Username"))
-    password = st.sidebar.text_input(t("Password"), type="password")
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric(("🚶 Steps"), steps_value, steps_change)
+    with col2:
+        st.metric(("💧 Water"), f"{water_value} {('Glasses')}", water_change)
+    with col3:
+        st.metric(("😴 Sleep"), f"{sleep_value} {('hrs')}", sleep_change)
+    with col4:
+        score = min(
+            100,
+            int(
+                (steps_value / 10000) * 40
+                + (water_value / 8) * 20
+                + (sleep_value / 8) * 20
+                + (mood_value / 10) * 20
+            )
+        )
+        st.metric(("❤️ Health Score"), f"{score}/100")
 
-    if st.sidebar.button(t(action)):
-        if action == "Signup":
-            success, user_id, uname = signup(username, password)
-            if success:
-                st.session_state.user_id = user_id
-                st.session_state.username = uname
-                st.rerun()
-            else:
-                st.sidebar.error(t("Username already exists."))
-        else:  # Login
-            success, user_id, uname = login(username, password)
-            if success:
-                st.session_state.user_id = user_id
-                st.session_state.username = uname
-                st.rerun()
-            else:
-                st.sidebar.error(t("Invalid credentials"))
-else:
-    st.sidebar.success(t(f"Logged in as {st.session_state.username}"))
-    if st.sidebar.button(t("Logout")):
-        st.session_state.user_id = None
-        st.session_state.username = None
-        st.rerun()
-        
-# =================================================
-# TABS
-# =================================================
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-    t("🤖 Symptom Chatbot"),
-    t("💊 Medicine OCR"),
-    t("📊 Health Tracker"),
-    t("🏥 Find Help Nearby"),
-    t("⚙️ Settings"),
-    t("ℹ️ About Chatbot"),
-])
+    st.markdown(
+        f"""
+        <div class='card'>
+            <h3>🩺 {("Health Status")}</h3>
+            <p>{("Track your habits, scan medicines and receive AI-powered health guidance.")}</p>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
 
 # =================================================
-# TAB 1 — SYMPTOM CHATBOT
+# ASSISTANT
 # =================================================
-with tab1:
-    st.header(t("Symptom Chatbot"))
-    if st.session_state.user_id is None:
-        st.info(t("Please log in to use the chatbot and save history."))
-    else:
-        history_file, _, _ = get_user_files()
-        symptoms = st.text_input(t("Describe your symptoms"))
-        if st.button(t("Get Info")) and symptoms.strip():
-            response = symptom_response(symptoms)
-            translated_response = translate_response(response)
-            st.markdown(f"<div class='card'>{translated_response}</div>", unsafe_allow_html=True)
-
-            df = pd.read_csv(history_file) if os.path.exists(history_file) else pd.DataFrame(columns=["date","symptoms","response"])
-            df.loc[len(df)] = [datetime.datetime.now().strftime("%Y-%m-%d %H:%M"), symptoms, translated_response]
-            df.to_csv(history_file, index=False)
-
-        st.subheader(t("Your Symptom History"))
-        if os.path.exists(history_file):
-            hist_df = pd.read_csv(history_file).tail(5)
-            for _, row in hist_df.iterrows():
-                st.markdown(
-                    f"<div class='card'><b>{row['date']}</b><br>🩺 {row['symptoms']}<br>💬 {row['response']}</div><br>",
-                    unsafe_allow_html=True
-                )
-        else:
-            st.info(t("No history yet. Your recent symptom entries will appear here."))
-
-# =================================================
-# TAB 2 — MEDICINE OCR
-# =================================================
-with tab2:
-    st.header(t("Medicine Image Identifier"))
-    col1, col2 = st.columns(2)
-    with col1: upload = st.file_uploader(t("Upload medicine image"), type=["jpg","png","jpeg"])
-    with col2: camera = st.camera_input(t("Take a photo"), key="camera_input")
-
-    img = None
-    if upload: img = Image.open(upload).convert("RGB")
-    elif camera: img = Image.open(camera).convert("RGB")
-
-    if img:
-        st.image(img, width=280)
-        st.markdown(f"<div class='card'>{t(extract_text(img))}</div>", unsafe_allow_html=True)
-
-# =================================================
-# TAB 3 — HEALTH TRACKER (TIPS TRANSLATED)
-# =================================================
-with tab3:
-    st.header(t("Daily Health Tracker"))
+elif page == "assistant":
+    st.header(("AI Assistant"))
 
     if st.session_state.user_id is None:
-        st.info(t("Please log in to save and view your health data."))
+        st.info(("Please login first"))
     else:
-        _, data_file, _ = get_user_files()
+        user_text = st.text_input(("How are you feeling?"))
+        if st.button(("Send")) and user_text.strip():
+            with st.spinner(("Preparing your response...")):
+                result = symptom_response(user_text)
+                result = (result)
+            st.markdown(
+                f"<div class='card'>{html.escape(str(result)).replace(chr(10), '<br>')}</div>",
+                unsafe_allow_html=True
+            )
+
+
+# =================================================
+# MEDICINE SCANNER
+# =================================================
+elif page == "assistant":
+
+    st.header(("AI Assistant"))
+
+    if st.session_state.user_id is None:
+        st.info(("Please login first"))
+
+    else:
+        user_text = st.text_input(
+            ("How are you feeling?")
+        )
+
+        if st.button(("Send")) and user_text.strip():
+
+            with st.spinner(("Preparing your response...")):
+
+                # Get original AI response
+                result = symptom_response(user_text)
+
+                # Translate the complete response using Gemini
+                result = (result)
+
+            st.markdown(
+                f"<div class='card'>{result}</div>",
+                unsafe_allow_html=True
+            )
+
+
+# =================================================
+# HEALTH TRACKER
+# =================================================
+elif page == "health":
+    st.header(("📊 Health Tracker"))
+
+    if st.session_state.user_id is None:
+        st.info(("Please login to view health tracker"))
+    else:
+        _, data_file, _, _ = get_user_files()
 
         if not os.path.exists(data_file):
             pd.DataFrame(
-                columns=["date","steps","sleep_hours","water_glasses","mood"]
+                columns=["date", "steps", "sleep_hours", "water_glasses", "mood"]
             ).to_csv(data_file, index=False)
 
         df = pd.read_csv(data_file)
 
-        # =========================
-        # INPUT FORM
-        # =========================
         with st.form("health_form"):
-            steps = st.number_input(t("Steps"), 0)
-            sleep = st.number_input(t("Sleep hours"), 0.0, 24.0, 7.0)
-            water = st.number_input(t("Water glasses"), 0, 20, 5)
-            mood = st.slider(t("Mood (1–10)"), 1, 10, 7)
-            submit = st.form_submit_button(t("Save"))
+            steps = st.number_input(("Steps"), min_value=0, step=1)
+            sleep = st.number_input(
+                ("Sleep hours"), min_value=0.0, max_value=24.0, value=7.0
+            )
+            water = st.number_input(
+                ("Water glasses"), min_value=0, max_value=20, value=5
+            )
+            mood = st.slider(("Mood (1–10)"), 1, 10, 7)
+            submit = st.form_submit_button(("Save"))
 
         if submit:
             df.loc[len(df)] = [
-                datetime.date.today(),
+                datetime.date.today().isoformat(),
                 steps,
                 sleep,
                 water,
-                mood
+                mood,
             ]
             df.to_csv(data_file, index=False)
-            st.success(t("Saved successfully"))
+            st.success(("Saved successfully"))
+            st.rerun()
 
-        # =========================
-        # WEEKLY TRENDS
-        # =========================
-        st.subheader(t("Weekly Trends"))
-
-        if len(df) > 0:
+        st.subheader(("Weekly Trends"))
+        if not df.empty:
             chart_df = df.copy()
             chart_df["date"] = pd.to_datetime(chart_df["date"])
             chart_df = chart_df.set_index("date")
-            st.line_chart(chart_df[["steps","sleep_hours","water_glasses","mood"]])
+            st.line_chart(
+                chart_df[["steps", "sleep_hours", "water_glasses", "mood"]]
+            )
         else:
-            st.info(t("No data to show trends yet."))
+            st.info(("No data to show trends yet."))
 
-        # =========================
-        # STREAKS & BADGES
-        # =========================
-        st.subheader(t("Streaks & Badges"))
-
+        st.subheader(("Streaks & Badges"))
         streak = 0
-        for s in reversed(df["steps"].tolist()):
-            if s >= 5000:
+        for value in reversed(df["steps"].tolist()):
+            if value >= 5000:
                 streak += 1
             else:
                 break
 
         badges = {
-            1: t("🥉 1 Day Active"),
-            3: t("🥈 3 Days Active"),
-            5: t("🥇 5 Days Active"),
-            7: t("🏆 7 Days Champion"),
+            1: ("🥉 1 Day Active"),
+            3: ("🥈 3 Days Active"),
+            5: ("🥇 5 Days Active"),
+            7: ("🏆 7 Days Champion"),
         }
 
         earned = False
-        for days, badge in badges.items():
+        for days, badge_text in badges.items():
             if streak >= days:
                 earned = True
-                st.markdown(f"<div class='card'>{badge}</div>", unsafe_allow_html=True)
+                st.markdown(
+                    f"<div class='card'>{html.escape(badge_text)}</div>",
+                    unsafe_allow_html=True
+                )
 
         if not earned:
-            st.info(t("No badges yet. Keep moving! 💪"))
+            st.info(("No badges yet. Keep moving! 💪"))
 
-        # =========================
-        # DAILY TIPS
-        # =========================
-        st.subheader(t("Daily Tips"))
+        st.subheader(("Daily Tips"))
+        if len(df) > 0:
+            latest = df.iloc[-1]
+            steps = int(latest["steps"])
+            water = int(latest["water_glasses"])
+            sleep = float(latest["sleep_hours"])
+            mood = int(latest["mood"])
 
-        if steps < 5000:
-            st.markdown(
-                f"<div class='card'>🚶 {t('Try a short walk today')}</div>",
-                unsafe_allow_html=True
-            )
+            tips = []
+            if steps < 5000:
+                tips.append(("🚶", "Try a short walk today"))
+            if water < 5:
+                tips.append(("💧", "Drink more water"))
+            if sleep < 6:
+                tips.append(("😴", "Try sleeping earlier tonight"))
+            if mood < 5:
+                tips.append(("😔", "Try to stay positive"))
+            if steps >= 5000 and water >= 5 and sleep >= 6 and mood >= 5:
+                tips.append(("🎉", "Great job maintaining healthy habits!"))
 
-        if water < 5:
-            st.markdown(
-                f"<div class='card'>💧 {t('Drink more water')}</div>",
-                unsafe_allow_html=True
-            )
+            for icon, tip in tips:
+                st.markdown(
+                    f"<div class='card'>{icon} {(tip)}</div>",
+                    unsafe_allow_html=True
+                )
 
-        if sleep < 6:
-            st.markdown(
-                f"<div class='card'>😴 {t('Try sleeping earlier tonight')}</div>",
-                unsafe_allow_html=True
-            )
+            if len(df) >= 3:
+                model = LinearRegression()
+                model.fit(
+                    df[["steps", "sleep_hours", "water_glasses"]],
+                    df["mood"]
+                )
+                last = df.iloc[-1]
+                prediction = model.predict([[
+                    last["steps"],
+                    last["sleep_hours"],
+                    last["water_glasses"],
+                ]])[0]
+                st.markdown(
+                    f"<div class='card'><b>{('Predicted mood tomorrow')}:</b> "
+                    f"{prediction:.1f}/10</div>",
+                    unsafe_allow_html=True
+                )
+        else:
+            st.info(("Add your first health entry to see your daily tips."))
 
-        if mood  < 5:
-            st.markdown(
-                f"<div class='card'>😔 {t('Try to stay positive')}</div>",
-                unsafe_allow_html=True
-            )
-
-        if steps >= 5000 and water >= 5 and sleep >= 6 and mood >= 5:
-            st.markdown(
-                f"<div class='card'>🎉 {t('Great job maintaining healthy habits!')}</div>",
-                unsafe_allow_html=True
-            )
-
-        # =========================
-        # MOOD PREDICTION
-        # =========================
-        if len(df) >= 3:
-            model = LinearRegression()
-            model.fit(
-                df[["steps","sleep_hours","water_glasses"]],
-                df["mood"]
-            )
-            last = df.iloc[-1]
-            prediction = model.predict([[
-                last["steps"],
-                last["sleep_hours"],
-                last["water_glasses"]
-            ]])[0]
-
-            st.markdown(
-                f"<div class='card'><b>{t('Predicted mood tomorrow')}:</b> {prediction:.1f}/10</div>",
-                unsafe_allow_html=True
-            )
 
 # =================================================
-# TAB 4 — FIND HELP NEARBY (FINAL COMPLETE)
+# NEARBY HELP
 # =================================================
-with tab4:
-    import folium
-    from streamlit_folium import st_folium
-    from geopy.geocoders import Nominatim
-    import osmnx as ox
-
-    st.header(t("Find Hospitals & Specialists"))
-
-    st.markdown(
-        f"<div class='card'>{t('Find nearby hospitals, doctors, pharmacies, or emergency services.')}</div>",
-        unsafe_allow_html=True
+elif page == "nearby":
+    st.header(("🏥 Nearby Help"))
+    st.write(
+        ("Find hospitals, doctors, pharmacies and emergency services near you.")
     )
 
-    # 🔹 INIT STATE
-    if "map_data" not in st.session_state:
-        st.session_state.map_data = None
-
-    # 🔹 INPUTS
-    location_input = st.text_input(
-        t("Enter your city or area"),
-        placeholder="e.g. Prishtina"
-    )
-
+    location_input = st.text_input(("City or Area"), value="Prishtina")
     search_type = st.selectbox(
-        t("What are you looking for?"),
-        [t("Hospitals"), t("Doctors"), t("Pharmacy"), t("Emergency")]
+        ("Type"),
+        ["Hospital", "Doctor", "Pharmacy", "Emergency"]
     )
 
-    # 🔹 SEARCH BUTTON
-    if st.button(t("Search")):
+    if "nearby_results" not in st.session_state:
+        st.session_state.nearby_results = None
 
-        geolocator = Nominatim(user_agent="health_app")
+    if st.button(("Search")):
+        with st.spinner(("Searching nearby locations...")):
+            geolocator = Nominatim(user_agent="smart_health_assistant")
+            loc = geolocator.geocode(location_input)
 
-        try:
-            location = geolocator.geocode(location_input if location_input else "Prishtina")
-            lat, lon = location.latitude, location.longitude
-        except:
-            st.error(t("Location not found"))
-            st.stop()
+            if loc is None:
+                st.session_state.nearby_results = {
+                    "error": "Location not found"
+                }
+            else:
+                maps_query = search_type.lower()
+                maps_url = (
+                    "https://www.google.com/maps/search/"
+                    f"{maps_query}+near+{location_input.replace(' ', '+')}"
+                )
 
-        # 🔹 MAP
-        m = folium.Map(location=[lat, lon], zoom_start=13)
+                if search_type == "Hospital" or search_type == "Emergency":
+                    tags = {"amenity": "hospital"}
+                elif search_type == "Doctor":
+                    tags = {"amenity": "clinic"}
+                else:
+                    tags = {"amenity": "pharmacy"}
 
-        # 🔹 SELECT FILTER
-        if search_type == t("Hospitals"):
-            tags = {"amenity": "hospital"}
-            query = "hospitals"
-        elif search_type == t("Doctors"):
-            tags = {"amenity": "clinic"}
-            query = "doctors"
-        elif search_type == t("Pharmacy"):
-            tags = {"amenity": "pharmacy"}
-            query = "pharmacy"
-        else:  # Emergency
-            tags = {"amenity": "hospital"}
-            query = "emergency hospital"
+                places = []
+                try:
+                    data = ox.features_from_point(
+                        (loc.latitude, loc.longitude),
+                        tags=tags,
+                        dist=3000
+                    )
+                    for _, row in data.iterrows():
+                        geometry = row.geometry
+                        if geometry is not None and geometry.geom_type == "Point":
+                            places.append({
+                                "name": row.get("name", "Unknown"),
+                                "lat": geometry.y,
+                                "lon": geometry.x,
+                            })
+                except Exception as e:
+                    print("NEARBY SEARCH ERROR:", e)
 
-        places_data = []
+                st.session_state.nearby_results = {
+                    "lat": loc.latitude,
+                    "lon": loc.longitude,
+                    "places": places,
+                    "maps_url": maps_url,
+                    "location": location_input,
+                }
 
-        try:
-            places = ox.features_from_point((lat, lon), tags=tags, dist=3000)
+    if st.session_state.nearby_results:
+        results = st.session_state.nearby_results
 
-            for _, row in places.iterrows():
-                if "geometry" in row and row.geometry.geom_type == "Point":
-                    name = row.get("name", "Unnamed")
-                    lat_p = row.geometry.y
-                    lon_p = row.geometry.x
+        if "error" in results:
+            st.error(("Error: " + results["error"]))
+        else:
+            map_object = folium.Map(
+                location=[results["lat"], results["lon"]],
+                zoom_start=13
+            )
+            folium.Marker(
+                [results["lat"], results["lon"]],
+                popup=("Selected Location"),
+                tooltip=results["location"],
+                icon=folium.Icon(color="red")
+            ).add_to(map_object)
 
-                    places_data.append((name, lat_p, lon_p))
+            for place in results["places"]:
+                folium.Marker(
+                    [place["lat"], place["lon"]],
+                    popup=place["name"],
+                    tooltip=place["name"]
+                ).add_to(map_object)
 
-                    folium.Marker(
-                        [lat_p, lon_p],
-                        popup=f"🏥 {name}",
-                        tooltip=name
-                    ).add_to(m)
+            st_folium(
+                map_object,
+                use_container_width=True,
+                height=500
+            )
 
-        except:
-            st.warning(t("Could not load places"))
+            st.link_button(
+                ("🌍 Open in Google Maps"),
+                results["maps_url"]
+            )
+            st.subheader(("Nearby Results"))
 
-        # 🔹 GOOGLE MAPS LINK
-        maps_url = f"https://www.google.com/maps/search/{query}+in+{location_input.replace(' ', '+')}"
+            if results["places"]:
+                for place in results["places"][:15]:
+                    st.write(f"🏥 {place['name']}")
+            else:
+                st.info(("No nearby locations found."))
 
-        # 🔹 SAVE STATE
-        st.session_state.map_data = {
-            "map": m,
-            "places": places_data,
-            "location": location.address,
-            "maps_url": maps_url,
-            "type": search_type
-        }
+            st.markdown(
+                f"""
+                <div class='card'>
+                    🚑 <b>{('Emergency Number')}:</b> 112
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
 
-    # 🔥 DISPLAY RESULTS (PERSISTENT)
-    if st.session_state.map_data:
 
-        st.success(f"{t('Location')}: {st.session_state.map_data['location']}")
+# =================================================
+# MEDICATION REMINDER CHECK
+# =================================================
+if st.session_state.user_id is not None:
+    _, _, _, meds_file = get_user_files()
 
-        # 🗺 MAP
-        st_folium(st.session_state.map_data["map"], width=700, height=500)
+    if meds_file and os.path.exists(meds_file):
+        meds_df = pd.read_csv(meds_file)
+        current_time = datetime.datetime.now().strftime("%H:%M")
 
-        # 📍 GOOGLE MAPS LINK
-        st.markdown(
-            f"""
-            <div class='card'>
-            📍 <a href="{st.session_state.map_data['maps_url']}" target="_blank">
-            {t('Open full results in Google Maps')}
-            </a>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+        if "taken" in meds_df.columns:
+            pending = int((meds_df["taken"] == False).sum())
+            st.sidebar.metric(("💊 Pending"), pending)
 
-        # 🏥 LIST
-        if st.session_state.map_data["places"]:
-            st.subheader(t("Nearby places"))
-            for name, _, _ in st.session_state.map_data["places"][:10]:
-                st.markdown(f"- 🏥 {name}")
+            for _, row in meds_df.iterrows():
+                if (
+                    "time" in meds_df.columns
+                    and "medicine" in meds_df.columns
+                    and row["time"] <= current_time
+                    and not bool(row["taken"])
+                ):
+                    st.toast(
+                        ("Time to take") + f" {row['medicine']}",
+                        icon="⏰"
+                    )
+                    st.warning(
+                        ("Time to take") + f" {row['medicine']} "
+                        f"({row.get('dosage', '')})"
+                    )
 
-    # 🚑 EMERGENCY SECTION (ALWAYS)
-    st.subheader(t("Emergency Help"))
 
-    st.markdown(
-        f"""
-        <div class='card'>
-        🚑 <b>{t('Emergency Number')}:</b> 112<br><br>
-        📞 <a href="tel:112">{t('Call Now (Mobile only)')}</a><br><br>
-        💻 {t('If you are on a computer, please call using your phone')}
-        </div>
-        """,
-        unsafe_allow_html=True
+# =================================================
+# REMINDERS
+# =================================================
+if page == "reminders":
+    st.header(("💊 Medication Reminders"))
+
+    if st.session_state.user_id is None:
+        st.info(("Please login first."))
+    else:
+        _, _, _, meds_file = get_user_files()
+
+        if not os.path.exists(meds_file):
+            pd.DataFrame(
+                columns=["medicine", "dosage", "time", "taken"]
+            ).to_csv(meds_file, index=False)
+
+        meds_df = pd.read_csv(meds_file)
+
+        with st.form("add_reminder"):
+            medicine = st.text_input(("Medicine"))
+            dosage = st.text_input(("Dosage"))
+            reminder_time = st.time_input(("Reminder Time"))
+            add = st.form_submit_button(("➕ Add Reminder"))
+
+        if add:
+            if medicine.strip():
+                meds_df.loc[len(meds_df)] = [
+                    medicine,
+                    dosage,
+                    reminder_time.strftime("%H:%M"),
+                    False,
+                ]
+                meds_df.to_csv(meds_file, index=False)
+                st.success(("Reminder added!"))
+                st.rerun()
+            else:
+                st.warning(("Please enter a medicine name."))
+
+        st.divider()
+        st.subheader(("Today's Reminders"))
+
+        if meds_df.empty:
+            st.info(("No reminders yet."))
+        else:
+            for index, row in meds_df.iterrows():
+                col1, col2, col3 = st.columns([6, 1, 1])
+
+                with col1:
+                    status = ("Taken") if bool(row["taken"]) else ("Pending")
+                    st.markdown(
+                        f"""
+                        ### 💊 {html.escape(str(row['medicine']))}
+
+                        **{("Dosage")}:** {html.escape(str(row['dosage']))}
+
+                        **{("Time")}:** {html.escape(str(row['time']))}
+
+                        **{("Status")}:** {html.escape(str(status))}
+                        """
+                    )
+
+                with col2:
+                    if not bool(row["taken"]):
+                        if st.button("✔", key=f"take_{index}"):
+                            meds_df.at[index, "taken"] = True
+                            meds_df.to_csv(meds_file, index=False)
+                            st.success(("Medicine marked as taken!"))
+                            st.rerun()
+
+                with col3:
+                    if st.button("🗑", key=f"delete_{index}"):
+                        meds_df = meds_df.drop(index).reset_index(drop=True)
+                        meds_df.to_csv(meds_file, index=False)
+                        st.rerun()
+
+                st.divider()
+
+
+# =================================================
+# SETTINGS
+# =================================================
+if page == "settings":
+    st.header(("⚙️ Settings"))
+
+    theme_options = ["Black Mode", "White Mode"]
+    selected_theme = st.radio(
+        ("Theme"),
+        theme_options,
+        index=theme_options.index(st.session_state.theme)
     )
-# =================================================
-# TAB 5 — SETTINGS
-# =================================================
-with tab5:
-    st.header(t("Settings"))
-    theme = st.radio(t("Choose Theme"), ["Black Mode","White Mode"], index=0 if st.session_state.theme=="Black Mode" else 1)
-    if theme != st.session_state.theme:
-        st.session_state.theme = theme
-        apply_theme(theme)
-    feedback = st.text_area(t("Leave feedback"))
-    if st.button(t("Submit Feedback")) and feedback.strip():
-        st.success(t("Thank you for reviewing our chatbot!"))
 
-# =================================================
-# TAB 6 — ABOUT
-# =================================================
-with tab6:
-    about_text = """
-# 🩺 Smart Health Assistant
+    if selected_theme != st.session_state.theme:
+        st.session_state.theme = selected_theme
+        st.rerun()
 
-**Welcome to the Smart Health Assistant!**
+    feedback = st.text_area(
+        ("Feedback"),
+        placeholder=("Tell us about your experience...")
+    )
 
-This AI health assistant helps users:
+    if st.button(("Submit Feedback")):
+        if feedback.strip():
+            with open("feedback.txt", "a", encoding="utf-8") as file:
+                file.write(
+                    f"{datetime.datetime.now()} | "
+                    f"User: {st.session_state.user_id}\n"
+                    f"{feedback}\n\n"
+                )
 
-1. **Symptom Chatbot** — Describe your symptoms and get helpful guidance, including a history of your last entries.
-2. **Medicine OCR** — Upload or take a photo of medicines to extract readable text.
-3. **Daily Health Tracker** — Log your steps, sleep, water, and mood, see trends, badges, tips, and predictions.
-4. **Vitals & Measurements** — Log your weight, height, and body info to track calories, BMI, and more.
-5. **Settings** — Change themes, leave feedback, and select your language.
+            st.success(("Feedback submitted successfully!"))
+            st.markdown(
+                f"""
+                <div class='card'>
+                    💬 {("Thank you for reviewing our chatbot!")}
+                    {("We appreciate your suggestions.")}
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+        else:
+            st.warning(("Please enter feedback first."))
 
-⚠️ **Educational use only. Not a replacement for medical advice.**
-"""
-    st.markdown(translate_response(about_text))
+    st.markdown("---")
+    st.caption(
+        ("🩺 Smart Health Assistant • AI-powered health companion • Educational use only")
+    )

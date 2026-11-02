@@ -1,25 +1,89 @@
-import pytesseract
-from PIL import Image, ImageEnhance, ImageFilter
-import os
+import easyocr
+import numpy as np
+from PIL import Image
+from google import genai
 
-def extract_text(image: Image.Image) -> str:
+# ----------------------------
+# Gemini
+# ----------------------------
+
+import streamlit as st
+
+API_KEY = st.secrets["GOOGLE_API_KEY"]
+
+client = genai.Client(api_key=API_KEY)
+
+# ----------------------------
+# EasyOCR (fallback)
+# ----------------------------
+
+reader = easyocr.Reader(["en"], gpu=False)
+
+
+def extract_text(image: Image.Image):
+
     try:
-        gray = image.convert("L")
 
-        enhancer = ImageEnhance.Contrast(gray)
-        enhanced = enhancer.enhance(2.5)
+        # First try Gemini Vision
 
-        sharpened = enhanced.filter(ImageFilter.SHARPEN)
+        prompt = """
+If the image contains:
 
-        custom_config = r"--oem 3 --psm 6"
-        text = pytesseract.image_to_string(sharpened, config=custom_config)
+• medicine
+→ explain the medicine
 
-        text = text.strip()
+• skin rash
+→ describe what it looks like
+→ possible causes
+→ when to see a doctor
 
-        if not text:
-            return "❌ No readable text found. Try clearer lighting or move closer."
+• wound
+→ explain severity
+→ basic first aid
 
-        return text
+• prescription
+→ explain it simply
+
+• lab report
+→ explain results
+
+• food
+→ estimate calories
+
+If uncertain, clearly state uncertainty.
+
+Never claim a medical diagnosis.
+Recommend seeing a healthcare professional for concerning findings.
+"""
+
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=[prompt, image]
+        )
+
+        if response.text:
+            return "💊 Gemini Analysis\n\n" + response.text
+
+    except Exception:
+        pass
+
+    # ----------------------------
+    # Fallback OCR
+    # ----------------------------
+
+    try:
+
+        img = np.array(image)
+
+        results = reader.readtext(img, detail=0)
+
+        if not results:
+            return "❌ No readable text found."
+
+        text = "\n".join(results)
+
+        return f"📝 OCR Text\n\n{text}"
 
     except Exception as e:
-        return f"⚠️ OCR Error: {e}"
+
+        return f"❌ Error:\n{e}"

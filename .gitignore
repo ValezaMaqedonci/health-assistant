@@ -1,15 +1,10 @@
 venv/
-.venv/
+venv.and.stuff/
 __pycache__/
-.vscode/
-cache/
-about_chatbot.md
-
-# Data files (VERY IMPORTANT)
-*.db
-*.csv
-
-# Python junk
 *.pyc
-*.pyo
-*.pyd
+.streamlit/secrets.toml
+users.db
+*_history_*.csv
+user_data_*.csv
+vitals_data_*.csv
+medications_*.csv
