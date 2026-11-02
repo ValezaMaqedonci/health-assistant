@@ -15,6 +15,8 @@ import folium
 import osmnx as ox
 from streamlit_folium import st_folium
 from utils.body_explorer import render_body_explorer
+import altair as alt
+
 
 
 # =================================================
@@ -105,67 +107,160 @@ def go(page):
 # =================================================
 # THEME
 # =================================================
+
 def apply_theme(theme):
     if theme == "Black Mode":
-        st.markdown("""
-        <style>
-        .stApp { background:#0F172A; color:white; }
-        section[data-testid="stSidebar"] {
-            background:#111827; border-right:1px solid #1F2937;
-        }
-        .card {
-            background:linear-gradient(135deg,#1E293B,#334155);
-            border-radius:22px; padding:22px; margin-bottom:20px;
-            box-shadow:0 10px 30px rgba(0,0,0,.35); transition:.3s;
-        }
-        .card:hover { transform:translateY(-3px); }
-        .stButton>button {
-            width:100%; border:none; border-radius:16px; padding:14px;
-            font-size:16px; font-weight:600;
-            background:linear-gradient(90deg,#2f343d); color:white;
-        }
-        .stButton>button:hover {
-            background:linear-gradient(90deg,#1C7BFF,#4098FF);
-        }
-        input,textarea { border-radius:14px !important; }
-        [data-testid="metric-container"] {
-            background:#1E293B; border-radius:18px; padding:18px;
-            box-shadow:0 6px 20px rgba(0,0,0,.3);
-        }
-        h1,h2,h3,h4,h5,h6 { color:white; }
-        .stProgress>div>div { background:#2E8BFF; }
-        </style>
-        """, unsafe_allow_html=True)
+        bg = "#0F172A"
+        sidebar = "#111827"
+        surface = "#1E293B"
+        text = "#F8FAFC"
+        border = "#334155"
+        muted = "#CBD5E1"
+        input_bg = "#1E293B"
     else:
-        st.markdown("""
-        <style>
-        .stApp { background:#F4F7FC; color:#111827; }
-        section[data-testid="stSidebar"] {
-            background:white; border-right:1px solid #E5E7EB;
-        }
-        .card {
-            background:white; border-radius:22px; padding:22px;
-            margin-bottom:20px; box-shadow:0 8px 25px rgba(0,0,0,.08);
-            transition:.3s;
-        }
-        .card:hover { transform:translateY(-3px); }
-        .stButton>button {
-            width:100%; border:none; border-radius:16px; padding:14px;
-            font-size:16px; font-weight:600;
-            background:linear-gradient(90deg,#2E8BFF,#4FA3FF); color:white;
-        }
-        .stButton>button:hover {
-            background:linear-gradient(90deg,#1C7BFF,#4098FF);
-        }
-        input,textarea { border-radius:14px !important; }
-        [data-testid="metric-container"] {
-            background:white; border-radius:18px; padding:18px;
-            box-shadow:0 6px 20px rgba(0,0,0,.08);
-        }
-        .stProgress>div>div { background:#2E8BFF; }
-        h1,h2,h3,h4,h5,h6 { color:#111827; }
-        </style>
-        """, unsafe_allow_html=True)
+        bg = "#F4F7FC"
+        sidebar = "#FFFFFF"
+        surface = "#FFFFFF"
+        text = "#111827"
+        border = "#E5E7EB"
+        muted = "#64748B"
+        input_bg = "#FFFFFF"
+
+    st.markdown(f"""
+    <style>
+    /* Main application */
+    .stApp {{
+        background-color: {bg} !important;
+        color: {text} !important;
+    }}
+
+    [data-testid="stAppViewContainer"],
+    [data-testid="stMain"] {{
+        background-color: {bg} !important;
+        color: {text} !important;
+    }}
+
+    /* Sidebar */
+    section[data-testid="stSidebar"] {{
+        background-color: {sidebar} !important;
+        border-right: 1px solid {border};
+    }}
+
+    section[data-testid="stSidebar"] * {{
+        color: {text};
+    }}
+
+    /* All text */
+    .stApp h1, .stApp h2, .stApp h3,
+    .stApp h4, .stApp h5, .stApp h6,
+    .stApp p, .stApp label,
+    .stApp li, .stApp span {{
+        color: {text};
+    }}
+
+    .stApp small,
+    [data-testid="stCaptionContainer"] {{
+        color: {muted} !important;
+    }}
+
+    /* Cards */
+    .card {{
+        background: {surface};
+        color: {text};
+        border: 1px solid {border};
+        border-radius: 22px;
+        padding: 22px;
+        margin-bottom: 20px;
+        box-shadow: 0 6px 20px rgba(0,0,0,0.06);
+        transition: 0.3s;
+    }}
+
+    .card:hover {{
+        transform: translateY(-3px);
+    }}
+
+    /* Metrics */
+    [data-testid="stMetric"] {{
+        background: {surface};
+        border: 1px solid {border};
+        border-radius: 18px;
+        padding: 18px;
+    }}
+
+    [data-testid="stMetricLabel"],
+    [data-testid="stMetricValue"],
+    [data-testid="stMetricDelta"] {{
+        color: {text} !important;
+    }}
+
+    /* Input fields */
+    .stTextInput input,
+    .stTextArea textarea,
+    .stNumberInput input,
+    .stDateInput input,
+    .stTimeInput input {{
+        background-color: {input_bg} !important;
+        color: {text} !important;
+        border: 1px solid {border} !important;
+        border-radius: 12px !important;
+    }}
+
+    /* Select boxes and dropdowns */
+    [data-baseweb="select"] > div,
+    [data-baseweb="popover"],
+    [data-baseweb="menu"] {{
+        background-color: {surface} !important;
+        color: {text} !important;
+    }}
+
+    /* Buttons */
+    .stButton > button,
+    .stFormSubmitButton > button {{
+        background: linear-gradient(90deg, #042f69);
+        color: white !important;
+        border: none;
+        border-radius: 14px;
+        padding: 12px 18px;
+        font-weight: 600;
+    }}
+
+    .stButton > button:hover,
+    .stFormSubmitButton > button:hover {{
+        background: #1C7BFF;
+        color: white !important;
+    }}
+
+    /* Forms and containers */
+    [data-testid="stForm"],
+    [data-testid="stExpander"] {{
+        background-color: {surface};
+        border: 1px solid {border};
+        border-radius: 16px;
+    }}
+
+    /* Dividers */
+    hr {{
+        border-color: {border} !important;
+    }}
+
+    /* Progress bars */
+    .stProgress > div > div {{
+        background-color: #2E8BFF;
+    }}
+
+    /* Radio buttons and checkboxes */
+    [data-testid="stRadio"],
+    [data-testid="stCheckbox"] {{
+        color: {text} !important;
+    }}
+
+    /* Dataframes */
+    [data-testid="stDataFrame"] {{
+        background-color: {surface};
+    }}
+    </style>
+    """, unsafe_allow_html=True)
+
 
 
 apply_theme(st.session_state.theme)
@@ -396,158 +491,299 @@ elif page == "assistant":
 # =================================================
 # MEDICINE SCANNER
 # =================================================
-elif page == "assistant":
-
-    st.header(("AI Assistant"))
+elif page == "scan":
+    st.header("Medicine Scanner")
 
     if st.session_state.user_id is None:
-        st.info(("Please login first"))
-
+        st.info("Please login first")
     else:
-        user_text = st.text_input(
-            ("How are you feeling?")
+        option = st.radio(
+            "Choose scanning method",
+            ["Camera", "Upload Image"],
+            horizontal=True
         )
 
-        if st.button(("Send")) and user_text.strip():
-
-            with st.spinner(("Preparing your response...")):
-
-                # Get original AI response
-                result = symptom_response(user_text)
-
-                # Translate the complete response using Gemini
-                result = (result)
-
-            st.markdown(
-                f"<div class='card'>{result}</div>",
-                unsafe_allow_html=True
+        if option == "Camera":
+            image_file = st.camera_input("Take a picture")
+        else:
+            image_file = st.file_uploader(
+                "Upload medicine image",
+                type=["png", "jpg", "jpeg"]
             )
+
+        if image_file is not None:
+            image = Image.open(image_file).convert("RGB")
+            st.image(image, use_container_width=True)
+
+            if st.button("Analyze Image"):
+                with st.spinner("Gemini is analyzing..."):
+                    result = extract_text(image)
+
+                st.markdown(result)
 
 
 # =================================================
 # HEALTH TRACKER
 # =================================================
 elif page == "health":
-    st.header(("📊 Health Tracker"))
+    st.header("Health Tracker")
 
     if st.session_state.user_id is None:
-        st.info(("Please login to view health tracker"))
+        st.info("Please login to view your health tracker.")
+
     else:
         _, data_file, _, _ = get_user_files()
 
         if not os.path.exists(data_file):
             pd.DataFrame(
-                columns=["date", "steps", "sleep_hours", "water_glasses", "mood"]
+                columns=[
+                    "date",
+                    "steps",
+                    "sleep_hours",
+                    "water_glasses",
+                    "mood"
+                ]
             ).to_csv(data_file, index=False)
 
         df = pd.read_csv(data_file)
 
+        # DAILY HEALTH INPUT
+        st.subheader("Daily Health Information")
+
         with st.form("health_form"):
-            steps = st.number_input(("Steps"), min_value=0, step=1)
+            steps = st.number_input("Steps", min_value=0, step=1)
             sleep = st.number_input(
-                ("Sleep hours"), min_value=0.0, max_value=24.0, value=7.0
+                "Sleep hours",
+                min_value=0.0,
+                max_value=24.0,
+                value=7.0,
+                step=0.5
             )
             water = st.number_input(
-                ("Water glasses"), min_value=0, max_value=20, value=5
+                "Water glasses",
+                min_value=0,
+                max_value=20,
+                value=5
             )
-            mood = st.slider(("Mood (1–10)"), 1, 10, 7)
-            submit = st.form_submit_button(("Save"))
+            mood = st.slider("Mood (1–10)", 1, 10, 7)
+
+            submit = st.form_submit_button("Save")
 
         if submit:
-            df.loc[len(df)] = [
-                datetime.date.today().isoformat(),
-                steps,
-                sleep,
-                water,
-                mood,
-            ]
+            new_entry = {
+                "date": datetime.date.today().isoformat(),
+                "steps": steps,
+                "sleep_hours": sleep,
+                "water_glasses": water,
+                "mood": mood
+            }
+
+            df = pd.concat(
+                [df, pd.DataFrame([new_entry])],
+                ignore_index=True
+            )
             df.to_csv(data_file, index=False)
-            st.success(("Saved successfully"))
+
+            st.success("Your health information was saved successfully!")
             st.rerun()
 
-        st.subheader(("Weekly Trends"))
+        st.divider()
+
+        # WEEKLY TRENDS
+        st.subheader("Weekly Trends")
+
         if not df.empty:
             chart_df = df.copy()
-            chart_df["date"] = pd.to_datetime(chart_df["date"])
-            chart_df = chart_df.set_index("date")
-            st.line_chart(
-                chart_df[["steps", "sleep_hours", "water_glasses", "mood"]]
-            )
-        else:
-            st.info(("No data to show trends yet."))
 
-        st.subheader(("Streaks & Badges"))
+            chart_df["date"] = pd.to_datetime(
+                chart_df["date"],
+                errors="coerce"
+            )
+
+            columns = [
+                "steps",
+                "sleep_hours",
+                "water_glasses",
+                "mood"
+            ]
+
+            for column in columns:
+                chart_df[column] = pd.to_numeric(
+                    chart_df[column],
+                    errors="coerce"
+                )
+
+            chart_df = chart_df.dropna(subset=["date"])
+            chart_df = chart_df.sort_values("date").tail(7)
+
+            chart = alt.Chart(
+                chart_df
+            ).transform_fold(
+                columns,
+                as_=["Metric", "Value"]
+            ).mark_line(
+                point=True,
+                strokeWidth=3
+            ).encode(
+                x=alt.X("date:T", title="Date"),
+                y=alt.Y("Value:Q", title="Value"),
+                color=alt.Color("Metric:N", title="Health Metrics"),
+                tooltip=[
+                    alt.Tooltip("date:T", title="Date"),
+                    alt.Tooltip("Metric:N", title="Metric"),
+                    alt.Tooltip("Value:Q", title="Value")
+                ]
+            ).properties(
+                height=350,
+                background="transparent"
+            ).configure_view(
+                fill="transparent",
+                stroke=None
+            ).configure(
+                background="transparent"
+            )
+
+            st.altair_chart(
+                chart,
+                use_container_width=True,
+                theme=None
+            )
+
+        else:
+            st.info("No data to show trends yet.")
+
+        st.divider()
+
+        # STREAKS & BADGES
+        st.subheader("Streaks & Badges")
+
         streak = 0
-        for value in reversed(df["steps"].tolist()):
-            if value >= 5000:
-                streak += 1
-            else:
-                break
+
+        if not df.empty:
+            for value in reversed(df["steps"].tolist()):
+                if pd.notna(value) and float(value) >= 5000:
+                    streak += 1
+                else:
+                    break
+
+        st.metric("Current Activity Streak", f"{streak} days")
 
         badges = {
-            1: ("🥉 1 Day Active"),
-            3: ("🥈 3 Days Active"),
-            5: ("🥇 5 Days Active"),
-            7: ("🏆 7 Days Champion"),
+            1: "🥉 1 Day Active",
+            3: "🥈 3 Days Active",
+            5: "🥇 5 Days Active",
+            7: "🏆 7 Days Champion"
         }
 
         earned = False
+
         for days, badge_text in badges.items():
             if streak >= days:
                 earned = True
                 st.markdown(
-                    f"<div class='card'>{html.escape(badge_text)}</div>",
+                    f"""
+                    <div class="card">
+                        <h3>{html.escape(badge_text)}</h3>
+                    </div>
+                    """,
                     unsafe_allow_html=True
                 )
 
         if not earned:
-            st.info(("No badges yet. Keep moving! 💪"))
+            st.info("No badges yet. Keep building healthy habits!")
 
-        st.subheader(("Daily Tips"))
-        if len(df) > 0:
+        st.divider()
+
+        # DAILY TIPS
+        st.subheader("Daily Tips")
+
+        if not df.empty:
             latest = df.iloc[-1]
-            steps = int(latest["steps"])
-            water = int(latest["water_glasses"])
-            sleep = float(latest["sleep_hours"])
-            mood = int(latest["mood"])
+
+            latest_steps = int(latest["steps"])
+            latest_water = int(latest["water_glasses"])
+            latest_sleep = float(latest["sleep_hours"])
+            latest_mood = int(latest["mood"])
 
             tips = []
-            if steps < 5000:
-                tips.append(("🚶", "Try a short walk today"))
-            if water < 5:
-                tips.append(("💧", "Drink more water"))
-            if sleep < 6:
-                tips.append(("😴", "Try sleeping earlier tonight"))
-            if mood < 5:
-                tips.append(("😔", "Try to stay positive"))
-            if steps >= 5000 and water >= 5 and sleep >= 6 and mood >= 5:
-                tips.append(("🎉", "Great job maintaining healthy habits!"))
 
-            for icon, tip in tips:
+            if latest_steps < 5000:
+                tips.append("Try a short walk today.")
+
+            if latest_water < 5:
+                tips.append("Remember to drink water throughout the day.")
+
+            if latest_sleep < 6:
+                tips.append("Try to maintain a regular sleep schedule.")
+
+            if latest_mood < 5:
+                tips.append("Take a relaxing break and do something you enjoy.")
+
+            if (
+                latest_steps >= 5000
+                and latest_water >= 5
+                and latest_sleep >= 6
+                and latest_mood >= 5
+            ):
+                tips.append("Great job maintaining healthy habits!")
+
+            for tip in tips:
                 st.markdown(
-                    f"<div class='card'>{icon} {(tip)}</div>",
+                    f"""
+                    <div class="card">
+                        {html.escape(tip)}
+                    </div>
+                    """,
                     unsafe_allow_html=True
                 )
 
+            # MOOD PREDICTION
             if len(df) >= 3:
-                model = LinearRegression()
-                model.fit(
-                    df[["steps", "sleep_hours", "water_glasses"]],
-                    df["mood"]
-                )
-                last = df.iloc[-1]
-                prediction = model.predict([[
-                    last["steps"],
-                    last["sleep_hours"],
-                    last["water_glasses"],
-                ]])[0]
-                st.markdown(
-                    f"<div class='card'><b>{('Predicted mood tomorrow')}:</b> "
-                    f"{prediction:.1f}/10</div>",
-                    unsafe_allow_html=True
-                )
+                prediction_df = df[
+                    ["steps", "sleep_hours", "water_glasses", "mood"]
+                ].apply(
+                    pd.to_numeric,
+                    errors="coerce"
+                ).dropna()
+
+                if len(prediction_df) >= 3:
+                    model = LinearRegression()
+
+                    X = prediction_df[
+                        ["steps", "sleep_hours", "water_glasses"]
+                    ]
+                    y = prediction_df["mood"]
+
+                    model.fit(X, y)
+
+                    last_entry = prediction_df.iloc[-1]
+
+                    prediction = model.predict(
+                        pd.DataFrame([{
+                            "steps": last_entry["steps"],
+                            "sleep_hours": last_entry["sleep_hours"],
+                            "water_glasses": last_entry["water_glasses"]
+                        }])
+                    )[0]
+
+                    prediction = max(1, min(10, prediction))
+
+                    st.markdown(
+                        f"""
+                        <div class="card">
+                            <h3>Predicted Mood Tomorrow</h3>
+                            <h2>{prediction:.1f}/10</h2>
+                            <p>
+                                This is an experimental estimate based on
+                                previous health entries, not a medical prediction.
+                            </p>
+                        </div>
+                        """,
+                        unsafe_allow_html=True
+                    )
+
         else:
-            st.info(("Add your first health entry to see your daily tips."))
+            st.info("Add your first health entry to see your daily tips.")
 
 
 # =================================================
@@ -658,15 +894,8 @@ elif page == "nearby":
                     st.write(f"🏥 {place['name']}")
             else:
                 st.info(("No nearby locations found."))
-
-            st.markdown(
-                f"""
-                <div class='card'>
-                    🚑 <b>{('Emergency Number')}:</b> 112
-                </div>
-                """,
                 unsafe_allow_html=True
-            )
+
 
 
 # =================================================
